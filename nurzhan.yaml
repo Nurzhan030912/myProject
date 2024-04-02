@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "My Final project"
+Parameters:
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+
+  VPCCIDRParameter:
+    Type: String
+    Description: CIDR block for the VPC
+    Default: 10.5.0.0/16
+    ConstraintDescription: Must be a valid CIDR block
+
+  SubnetCidrBlock: 
+    Type: String
+    Description: CIDR block for the VPC
+    Default: 10.5.1.0/24
+
+Mappings:
+  AmiMappings:
+    us-east-1:
+      AmiId: ami-0c101f26f147fa7fd
+    us-west-2:
+      AmiId: ami-0a70b9d193ae8a799
+
+Resources:
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDRParameter
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1a"
+      CidrBlock: !Ref SubnetCidrBlock
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1b"
+      CidrBlock: 10.5.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1a"
+      CidrBlock: 10.5.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      AvailabilityZone: "us-east-1b"
+      CidrBlock: 10.5.4.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  MyRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref MyRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+  MyPublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref MyRouteTable
+
+  MyPublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref MyRouteTable
+
+  MySecurityGroupALB:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Nurzhan-sg-alb
+      GroupDescription: Allow HTTP access from ALB
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  MySecurityGroupASG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Nurzhan[-sg-asg
+      GroupDescription: Allow HTTP access from ASG
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+      - SourceSecurityGroupId: !GetAtt MySecurityGroupALB.GroupId
+        IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  MyKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: Keyforproject
+
+  MyLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: MyFinalLaunchTemplate
+      LaunchTemplateData:
+        ImageId: !FindInMap [AmiMappings, !Ref "AWS::Region", AmiId]
+        InstanceType: !Ref InstanceTypeParameter
+        KeyName: !Ref MyKeyPair
+        SecurityGroupIds:
+        SecurityGroupIds: 
+        - !GetAtt MySecurityGroupASG.GroupId
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+            echo "<!DOCTYPE html><html><head><title>Привет от Nurzhan!</title></head><body><h1>Добро пожаловать на мой сайт, созданный с помощью AWS CloudFormation!</h1><p>Я очень рад видеть вас здесь! $HOSTNAME</p></body></html>" > /var/www/html/index.html
+            
+ 
+  MyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: MyFinalTargetGroup
+      TargetType: instance
+      HealthCheckPath: /index.html
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref MyVPC
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  MyALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref MyTargetGroup
+      LoadBalancerArn: !Ref MyLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  MyLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+      - !Ref PublicSubnet1
+      - !Ref PublicSubnet2
+      SecurityGroups:
+      - !Ref MySecurityGroupALB
+      Tags:
+      - Key: Owner
+        Value: Nurzhan
+
+  MyAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DeletionPolicy: Delete
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      HealthCheckType: ELB
+      MaxSize: '3'
+      MinSize: '1'
+      DesiredCapacity: '2'
+      VPCZoneIdentifier: 
+       - !Ref PublicSubnet1
+       - !Ref PublicSubnet2
+      TargetGroupARNs: 
+       - !Ref MyTargetGroup
+
+Outputs:
+  LoadBalancerDNSName:
+    Value: !GetAtt MyLoadBalancer.DNSName
+    Description: DNS name of the Application Load Balancer
+  VPCCIDR: 
+    Value: !GetAtt MyVPC.CidrBlock
